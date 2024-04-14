@@ -1,0 +1,4 @@
+#ifndef HTML_CODE_H
+#define HTML_CODE_H
+
+const char Html_code[] PROGMEM = R"rawliteral(
