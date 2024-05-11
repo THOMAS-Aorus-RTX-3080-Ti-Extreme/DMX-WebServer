@@ -1,7 +1,7 @@
 #ifndef HTML_CODE_H
 #define HTML_CODE_H
-
-const char Html_code[] PROGMEM = R"rawliteral(<!DOCTYPE html>
+const char Html_code[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -296,7 +296,9 @@ width: 50%;
 
     <footer>
         <p>Created by Thomas Bringolf, 10c</p>
-        <p>Compiled last on 14.04.2024</p>
+        <p>Compiled last on 11.05.2024</p>
+        <p>For any support please write to <b>thomas.bringolf@gmail.com</b></p>
+        <p>Lastest source Code can be found at <b>https://github.com/THOMAS-Aorus-RTX-3080-Ti-Extreme/DMX-WebServer</b></p>
     </footer>
 
     <script>
@@ -599,5 +601,4 @@ width: 50%;
 </body>
 
 </html>)rawliteral";
-
-#endif
+#endif
