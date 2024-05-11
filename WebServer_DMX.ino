@@ -16,6 +16,8 @@ const char *password = "Optik_101";
 int transmitPin = 17;
 int receivePin = 18;
 int enablePin = 4;
+int dirPin = 5;
+int NeoPixelPin = 48;
 dmx_port_t dmxPort = 1;
 
 
@@ -24,26 +26,33 @@ IPAddress gateway(192, 168, 1, 1);   // Gateway address
 IPAddress subnet(255, 255, 255, 0);  // Subnet mask
 
 WebServer server(80);
-Adafruit_NeoPixel strip(1, 48, NEO_GRB + NEO_KHZ800);
+TaskHandle_t DMXtransmitTask;
+Adafruit_NeoPixel strip(1, NeoPixelPin, NEO_GRB + NEO_KHZ800);
 
 // Initialize channel values
-int currentValues[12];
+byte DMXchannel[DMX_PACKET_SIZE]  {0};
+byte* currentValues[12];
+
 int presetList[10][12]; 
 
 void setup() {
-  pinMode(5, OUTPUT);
-  pinMode(48, OUTPUT);
-  digitalWrite(5, HIGH);
+  currentValues[0] = &DMXchannel[1];
+  currentValues[1] = &DMXchannel[2];
+  currentValues[2] = &DMXchannel[3];
+  currentValues[3] = &DMXchannel[4];
+  currentValues[4] = &DMXchannel[8];
+  currentValues[5] = &DMXchannel[9];
+  currentValues[6] = &DMXchannel[10];
+  currentValues[7] = &DMXchannel[11];
+  currentValues[8] = &DMXchannel[15];
+  currentValues[9] = &DMXchannel[16];
+  currentValues[10] = &DMXchannel[17];
+  currentValues[11] = &DMXchannel[18];
+
+  pinMode(NeoPixelPin, OUTPUT);
 
   EEPROM.begin(10*12 + 1);
   Serial.begin(115200);
-
-  //Setup DMX Tx
-  dmx_config_t config = DMX_CONFIG_DEFAULT;
-  dmx_personality_t personalities[] = {};
-  int personality_count = 0;
-  dmx_driver_install(dmxPort, &config, personalities, personality_count);
-  dmx_set_pin(dmxPort, transmitPin, receivePin, enablePin);
 
   // Set up ESP32 in Access Point (AP) mode with static IP
   WiFi.softAPConfig(local_IP, gateway, subnet);
@@ -54,22 +63,53 @@ void setup() {
   Serial.print("AP IP address: ");
   Serial.println(IP);
 
+  //Create DMX transmit Task
+  xTaskCreatePinnedToCore(
+    DMXtransmit, /* Function to implement the task */
+    "DMX Async Transmitter", /* Name of the task */
+    100000,  /* Stack size in words */
+    NULL,  /* Task input parameter */
+    0,  /* Priority of the task */
+    &DMXtransmitTask,  /* Task handle. */
+    0); /* Core where the task should run */
+
+
+
   //Serve Webpage
   server.on("/", serveWebPage);
   server.on("/favicon.ico", favicon);
   server.on("/set_channel", setChannel);
-  server.on("/set_preset", setPreset);
+  server.on("/set_preset", savePreset);
   server.on("/get_preset", getPreset);
-
   server.begin();
+
   Serial.println("HTTP server started");
   strip.begin();
-  strip.setPixelColor(0,0,10,0);
+  strip.setPixelColor(0,0,255,0);
   strip.show();
 }
 
 void loop() {
   server.handleClient();
+}
+
+void DMXtransmit( void * parameter) {
+  //Set direction pin to output on Tx/Rx Chip
+  pinMode(dirPin, OUTPUT);
+  digitalWrite(dirPin, HIGH);
+
+  //Configure DMX Tx
+  dmx_config_t config = DMX_CONFIG_DEFAULT;
+  dmx_personality_t personalities[] = {};
+  int personality_count = 0;
+  dmx_driver_install(dmxPort, &config, personalities, personality_count);
+  dmx_set_pin(dmxPort, transmitPin, receivePin, enablePin);
+  while(true) {
+    dmx_wait_sent(dmxPort, DMX_TIMEOUT_TICK);
+    dmx_write(dmxPort, DMXchannel, DMX_PACKET_SIZE);
+    dmx_send_num(dmxPort, DMX_PACKET_SIZE);
+    delay(10);
+  }
 }
 
 int* splitStringToIntArray(String input) {
@@ -107,34 +147,6 @@ void loadPreset() {
   }
 }
 
-void sendDMX() {
-  byte DMXchannel[DMX_PACKET_SIZE];
-  DMXchannel[1] = currentValues[0];
-  DMXchannel[2] = currentValues[1];
-  DMXchannel[3] = currentValues[2];
-  DMXchannel[4] = currentValues[3];
-  DMXchannel[5] = 0;
-  DMXchannel[6] = 0;
-  DMXchannel[7] = 0;
-  DMXchannel[8] = currentValues[4];
-  DMXchannel[9] = currentValues[5];
-  DMXchannel[10] = currentValues[6];
-  DMXchannel[11] = currentValues[7];
-  DMXchannel[12] = 0;
-  DMXchannel[13] = 0;
-  DMXchannel[14] = 0;
-  DMXchannel[15] = currentValues[8];
-  DMXchannel[16] = currentValues[9];
-  DMXchannel[17] = currentValues[10];
-  DMXchannel[18] = currentValues[11];
-  DMXchannel[19] = 0;
-  DMXchannel[20] = 0;
-  DMXchannel[21] = 0;
-  dmx_wait_sent(dmxPort, DMX_TIMEOUT_TICK);
-  dmx_write(dmxPort, DMXchannel, DMX_PACKET_SIZE);
-  dmx_send_num(dmxPort, DMX_PACKET_SIZE);
-}
-
 void serveWebPage() {
   // server.sendHeader("Content-Encoding", "gzip");
   server.send(200, "text/html", Html_code);
@@ -152,8 +164,8 @@ void setChannel() {
   int value = valueStr.toInt();
   if (channel < 1 || channel > 12 || value < 0 || value > 255)    { server.send(400, "text/plain", "Error: OutOfRange"); return; } //Out of Range
   if (value < 5) { value=0; }                                                     //If value to little, turn off lamp to aknolege for 1% problem
-  currentValues[channel - 1] = value;
-  sendDMX();
+  *currentValues[channel - 1] = static_cast<byte>(value);
+  //sendDMX();
   server.send(200, "text/plain", "Ok");
   return;
 }
@@ -167,8 +179,7 @@ void getPreset() {
   loadPreset();
   String response;
   response = "[";
-  for (int i = 0; i < 12; i++)
-  {
+  for (int i = 0; i < 12; i++) {
     response = response + String(presetList[presetId - 1][i]) + ",";
   }
   response.remove(response.length()-1);
@@ -177,7 +188,7 @@ void getPreset() {
   return;
 }
 
-void setPreset() {
+void savePreset() {
   String presetIdStr = server.arg("presetId");
   String PresetvaluesStr = server.arg("values");
   if (presetIdStr == "" || PresetvaluesStr == "")                         { server.send(400, "text/plain", "Error: EmptyError"); return; } //Empty request
@@ -193,8 +204,6 @@ void setPreset() {
     presetList[presetId - 1][i] = presetValues[i];   //Write the current preset in the list
   }
   storePreset();
-  sendDMX();
   server.send(200, "text/plain", "Ok");
-
   return;
 }
